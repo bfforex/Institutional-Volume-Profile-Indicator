@@ -305,7 +305,7 @@ ExtendedMLFeatures CFeatureExtractor::ExtractAllFeatures(int signal_type, double
 //+------------------------------------------------------------------+
 //| Calculate order flow imbalance from tick data                    |
 //+------------------------------------------------------------------+
-double CFeatureExtractor::CalculateOrderFlowImbalance(int lookback_bars = 10)
+double CFeatureExtractor::CalculateOrderFlowImbalance(int lookback_bars)
 {
    // Simplified version using candle direction as proxy
    // Full implementation would use CopyTicks() for actual tick analysis
@@ -404,7 +404,7 @@ void CFeatureExtractor::UpdateSpreadHistory()
 //+------------------------------------------------------------------+
 //| Get RSI value normalized to 0-1                                  |
 //+------------------------------------------------------------------+
-double CFeatureExtractor::GetRSIValue(int period = 14)
+double CFeatureExtractor::GetRSIValue(int period)
 {
    if(m_rsi_handle == INVALID_HANDLE)
       return 0.5; // Neutral if indicator unavailable
@@ -421,7 +421,7 @@ double CFeatureExtractor::GetRSIValue(int period = 14)
 //+------------------------------------------------------------------+
 //| Detect RSI divergence                                            |
 //+------------------------------------------------------------------+
-double CFeatureExtractor::DetectRSIDivergence(int lookback = 10)
+double CFeatureExtractor::DetectRSIDivergence(int lookback)
 {
    if(m_rsi_handle == INVALID_HANDLE)
       return 0; // No divergence
@@ -512,7 +512,7 @@ double CFeatureExtractor::GetBollingerBandPosition()
 //+------------------------------------------------------------------+
 //| Get historical win rate at similar zones                         |
 //+------------------------------------------------------------------+
-double CFeatureExtractor::GetHistoricalZoneWinRate(double zone_price, double tolerance = 0.0001)
+double CFeatureExtractor::GetHistoricalZoneWinRate(double zone_price, double tolerance)
 {
    int wins = 0;
    int losses = 0;
@@ -536,7 +536,7 @@ double CFeatureExtractor::GetHistoricalZoneWinRate(double zone_price, double tol
 //+------------------------------------------------------------------+
 //| Calculate candle body ratio                                      |
 //+------------------------------------------------------------------+
-double CFeatureExtractor::CalculateCandleBodyRatio(int bar_index = 0)
+double CFeatureExtractor::CalculateCandleBodyRatio(int bar_index)
 {
    double open = iOpen(m_symbol, m_timeframe, bar_index);
    double close = iClose(m_symbol, m_timeframe, bar_index);

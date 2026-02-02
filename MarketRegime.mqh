@@ -415,7 +415,7 @@ double CMarketRegimeDetector::GetRegimeMultiplier(int signal_type)
 //+------------------------------------------------------------------+
 //| Check if regime has been stable                                  |
 //+------------------------------------------------------------------+
-bool CMarketRegimeDetector::IsRegimeStable(int lookback_periods = 5)
+bool CMarketRegimeDetector::IsRegimeStable(int lookback_periods)
 {
    if(m_history_size < lookback_periods)
       return false;

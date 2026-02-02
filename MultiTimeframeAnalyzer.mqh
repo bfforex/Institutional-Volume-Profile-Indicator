@@ -104,7 +104,7 @@ public:
    double ScoreSession();
    double ScoreSpread();
    double ScoreTrendAlignment(int signal_type);
-   double ScoreNewsLearance();
+   double ScoreNewsClearance();
    
    // Getters
    MTFZoneData* GetMTFZone(ENUM_TIMEFRAMES tf);
@@ -407,7 +407,7 @@ ConfluenceScore CMultiTimeframeAnalyzer::CalculateConfluence(int signal_type, do
    score.session_score = ScoreSession();
    score.spread_score = ScoreSpread();
    score.trend_alignment = ScoreTrendAlignment(signal_type);
-   score.news_clearance = ScoreNewsLearance();
+   score.news_clearance = ScoreNewsClearance();
    score.ltf_confirmation = 0.5; // Placeholder - would need LTF analysis
    
    // Calculate weighted total
@@ -572,7 +572,7 @@ double CMultiTimeframeAnalyzer::ScoreTrendAlignment(int signal_type)
 //+------------------------------------------------------------------+
 //| Score news clearance                                             |
 //+------------------------------------------------------------------+
-double CMultiTimeframeAnalyzer::ScoreNewsLearance()
+double CMultiTimeframeAnalyzer::ScoreNewsClearance()
 {
    // Simplified - always return 1.0
    // Full implementation would check economic calendar

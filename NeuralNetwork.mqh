@@ -195,7 +195,7 @@ CNeuralNetwork::~CNeuralNetwork()
 //+------------------------------------------------------------------+
 //| Initialize neural network                                        |
 //+------------------------------------------------------------------+
-bool CNeuralNetwork::Initialize(double learning_rate = 0.001, double momentum = 0.9)
+bool CNeuralNetwork::Initialize(double learning_rate, double momentum)
 {
    m_learning_rate = learning_rate;
    m_momentum = momentum;
@@ -566,7 +566,7 @@ double CNeuralNetwork::SigmoidDerivative(double x)
 //+------------------------------------------------------------------+
 //| Activation: Leaky ReLU                                           |
 //+------------------------------------------------------------------+
-double CNeuralNetwork::LeakyReLU(double x, double alpha = 0.01)
+double CNeuralNetwork::LeakyReLU(double x, double alpha)
 {
    return (x > 0) ? x : alpha * x;
 }
@@ -574,7 +574,7 @@ double CNeuralNetwork::LeakyReLU(double x, double alpha = 0.01)
 //+------------------------------------------------------------------+
 //| Leaky ReLU Derivative                                            |
 //+------------------------------------------------------------------+
-double CNeuralNetwork::LeakyReLUDerivative(double x, double alpha = 0.01)
+double CNeuralNetwork::LeakyReLUDerivative(double x, double alpha)
 {
    return (x > 0) ? 1.0 : alpha;
 }
@@ -582,7 +582,7 @@ double CNeuralNetwork::LeakyReLUDerivative(double x, double alpha = 0.01)
 //+------------------------------------------------------------------+
 //| Clip gradient to prevent explosion                               |
 //+------------------------------------------------------------------+
-double CNeuralNetwork::ClipGradient(double gradient, double max_val = 1.0)
+double CNeuralNetwork::ClipGradient(double gradient, double max_val)
 {
    if(gradient > max_val) return max_val;
    if(gradient < -max_val) return -max_val;

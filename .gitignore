@@ -1,0 +1,34 @@
+# MetaTrader 5 files
+*.ex5
+*.log
+
+# Compiled files
+*.ex5
+
+# Temporary files
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test files
+/tmp/
+/test/
+/backtest_results/
+
+# User-specific settings
+*.tpl
+*.chr
+
+# Build artifacts
+/build/
+/dist/
+
+# Documentation build files
+/docs/_build/

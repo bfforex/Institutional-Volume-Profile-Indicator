@@ -519,9 +519,9 @@ double CalculateSignalConfidence(int bar, int signalType, const datetime &time[]
    confidence += volumeFactor * 0.15;
    
    //--- factor 3: rejection candle pattern
-   if(bar < ArraySize(close) - 1)
+   if(bar < ArraySize(close) - 1 && bar < ArraySize(open))
    {
-      double bodySize = MathAbs(close[bar] - close[bar + 1]);
+      double bodySize = MathAbs(open[bar] - close[bar]);
       double wickSize = (signalType == 1) ? 
          (close[bar] - low[bar]) : (high[bar] - close[bar]);
       

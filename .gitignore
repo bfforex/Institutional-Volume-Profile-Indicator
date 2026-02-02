@@ -2,9 +2,6 @@
 *.ex5
 *.log
 
-# Compiled files
-*.ex5
-
 # Temporary files
 *.tmp
 *~

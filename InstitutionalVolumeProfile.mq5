@@ -5,10 +5,11 @@
 //+------------------------------------------------------------------+
 #property copyright "Institutional Trading Systems"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property description "Volume Profile with Institutional Zone Detection"
-#property description "ML-Enhanced False Signal Filtering"
-#property description "First-Touch Zone Edge Reversal Strategy"
+#property description "Advanced ML-Enhanced Signal Filtering (18 features)"
+#property description "Market Regime Detection + MTF Confluence"
+#property description "Neural Network + Logistic Regression Ensemble"
 #property indicator_chart_window
 #property indicator_buffers 4
 #property indicator_plots   2
@@ -17,7 +18,7 @@
 #include "VolumeProfileEngine.mqh"
 #include "InstitutionalZoneDetector.mqh"
 #include "SignalEngine.mqh"
-#include "MLFilter.mqh"
+#include "EnsembleML.mqh"
 #include "Visualizer.mqh"
 
 //+------------------------------------------------------------------+
@@ -46,7 +47,16 @@ input bool InpEnablePushNotifications = false;            // Enable Push Notific
 input group "===== Machine Learning Filter ====="
 input bool InpMLEnabled = true;                           // Enable ML Filter
 input double InpMLConfidenceThreshold = 0.65;             // ML Confidence Threshold
-input double InpMLLearningRate = 0.01;                    // ML Learning Rate
+input double InpLRLearningRate = 0.01;                    // LR Learning Rate
+input double InpNNLearningRate = 0.001;                   // NN Learning Rate
+input double InpEnsembleWeightLR = 0.3;                   // Ensemble Weight: LR
+input double InpEnsembleWeightNN = 0.7;                   // Ensemble Weight: NN
+
+// === Advanced Features ===
+input group "===== Advanced ML Features ====="
+input bool InpEnableRegimeDetection = true;               // Enable Market Regime Detection
+input bool InpEnableMTFAnalysis = true;                   // Enable MTF Confluence
+input double InpMTFConfluenceThreshold = 0.4;             // Min MTF Confluence Score
 
 // === Visual Settings ===
 input group "===== Visual Settings ====="
@@ -77,7 +87,7 @@ double ConfidenceBuffer[];
 CVolumeProfileEngine* g_vpEngine;
 CInstitutionalZoneDetector* g_zoneDetector;
 CSignalEngine* g_signalEngine;
-CMLFilter* g_mlFilter;
+CEnsembleML* g_ensembleML;
 CVolumeProfileVisualizer* g_visualizer;
 
 datetime g_lastCalculationTime = 0;
@@ -124,12 +134,12 @@ int OnInit()
    g_vpEngine = new CVolumeProfileEngine();
    g_zoneDetector = new CInstitutionalZoneDetector();
    g_signalEngine = new CSignalEngine();
-   g_mlFilter = new CMLFilter();
+   g_ensembleML = new CEnsembleML();
    g_visualizer = new CVolumeProfileVisualizer();
    
    // Check allocation
    if(g_vpEngine == NULL || g_zoneDetector == NULL || g_signalEngine == NULL || 
-      g_mlFilter == NULL || g_visualizer == NULL)
+      g_ensembleML == NULL || g_visualizer == NULL)
    {
       Print("ERROR: Failed to allocate engine objects");
       return INIT_FAILED;
@@ -146,16 +156,19 @@ int OnInit()
    
    g_vpEngine.SetLookbackBars(InpLookbackBars);
    
-   // Initialize ML Filter
+   // Initialize Ensemble ML Filter
    if(InpMLEnabled)
    {
-      if(!g_mlFilter.Initialize(InpMLLearningRate, InpMLConfidenceThreshold, _Symbol))
+      if(!g_ensembleML.Initialize(InpLRLearningRate, InpNNLearningRate, 
+                                  InpMLConfidenceThreshold, _Symbol))
       {
-         Print("WARNING: ML Filter initialization failed - continuing without ML");
+         Print("WARNING: Ensemble ML initialization failed - continuing without ML");
       }
       else
       {
-         Print("ML Filter initialized successfully");
+         g_ensembleML.SetEnsembleWeights(InpEnsembleWeightLR, InpEnsembleWeightNN);
+         Print("=== Ensemble ML initialized successfully ===");
+         Print("LR Weight: ", InpEnsembleWeightLR, " NN Weight: ", InpEnsembleWeightNN);
       }
    }
    
@@ -167,7 +180,8 @@ int OnInit()
    }
    
    // Initialize Signal Engine
-   if(!g_signalEngine.Initialize(g_zoneDetector, g_mlFilter, InpSignalMode, InpMLEnabled))
+   if(!g_signalEngine.Initialize(g_zoneDetector, g_ensembleML, InpSignalMode, 
+                                 InpMLEnabled, InpEnableRegimeDetection, InpEnableMTFAnalysis))
    {
       Print("ERROR: Failed to initialize Signal Engine");
       return INIT_FAILED;
@@ -222,11 +236,11 @@ void OnDeinit(const int reason)
    }
    
    // Save ML state before deletion
-   if(g_mlFilter != NULL)
+   if(g_ensembleML != NULL)
    {
-      g_mlFilter.Deinitialize();
-      delete g_mlFilter;
-      g_mlFilter = NULL;
+      g_ensembleML.Deinitialize();
+      delete g_ensembleML;
+      g_ensembleML = NULL;
    }
    
    // Delete other objects
@@ -360,13 +374,13 @@ int OnCalculate(const int rates_total,
          Print("Reason: ", signal.signal_reason);
          
          // Display ML statistics
-         if(InpMLEnabled && g_mlFilter != NULL)
+         if(InpMLEnabled && g_ensembleML != NULL)
          {
             Print("=== ML Statistics ===");
-            Print("Total Signals: ", g_mlFilter.GetTotalSignals());
-            Print("Accepted Signals: ", g_mlFilter.GetAcceptedSignals());
-            Print("Accuracy: ", g_mlFilter.GetAccuracy() * 100, "%");
-            Print("Precision: ", g_mlFilter.GetPrecision() * 100, "%");
+             Print("=== Ensemble ML Statistics ===");
+             Print("Total Predictions: ", g_ensembleML.GetTotalPredictions());
+             Print("Successful: ", g_ensembleML.GetSuccessfulPredictions());
+             Print("Accuracy: ", g_ensembleML.GetAccuracy() * 100, "%");
          }
       }
    }

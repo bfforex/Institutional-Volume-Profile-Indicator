@@ -4,11 +4,14 @@
 //+------------------------------------------------------------------+
 #property copyright "Institutional Volume Profile System"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 #include "InstitutionalZoneDetector.mqh"
-#include "MLFilter.mqh"
+#include "FeatureExtractor.mqh"
+#include "MarketRegime.mqh"
+#include "MultiTimeframeAnalyzer.mqh"
+#include "EnsembleML.mqh"
 
 //+------------------------------------------------------------------+
 //| Signal Trigger Mode                                              |
@@ -31,11 +34,14 @@ struct TradingSignal
    
    double   confidence;         // ML confidence score
    bool     ml_approved;        // Passed ML filter
+   double   regime_multiplier;  // Market regime adjustment
+   double   confluence_score;   // MTF confluence score
    
    int      zone_index;         // Which zone triggered signal
    datetime signal_time;
    
    bool     is_first_touch;     // First-touch principle flag
+   ENUM_MARKET_REGIME market_regime; // Current market regime
    
    string   signal_reason;      // Description for logging
 };
@@ -47,10 +53,15 @@ class CSignalEngine
 {
 private:
    CInstitutionalZoneDetector* m_zone_detector;
-   CMLFilter* m_ml_filter;
+   CEnsembleML* m_ensemble_ml;
+   CFeatureExtractor* m_feature_extractor;
+   CMarketRegimeDetector* m_regime_detector;
+   CMultiTimeframeAnalyzer* m_mtf_analyzer;
    
    ENUM_SIGNAL_MODE m_signal_mode;
    bool m_ml_enabled;
+   bool m_regime_enabled;
+   bool m_mtf_enabled;
    
    // Price tracking for first-touch detection
    struct ZoneTouch
@@ -78,15 +89,17 @@ public:
    ~CSignalEngine();
    
    bool Initialize(CInstitutionalZoneDetector* zone_detector, 
-                   CMLFilter* ml_filter,
+                   CEnsembleML* ensemble_ml,
                    ENUM_SIGNAL_MODE signal_mode,
-                   bool ml_enabled);
+                   bool ml_enabled,
+                   bool regime_enabled = true,
+                   bool mtf_enabled = true);
    
    // Signal generation
    bool CheckForSignal(TradingSignal &signal);
    
-   // Feature extraction for ML
-   MLFeatures ExtractFeatures(int signal_type, double entry_price, int zone_index);
+   // Feature extraction (now handled by CFeatureExtractor)
+   // Removed old ExtractFeatures method
    
    // Touch tracking
    void UpdateZoneTouches(double current_price, double previous_price);
@@ -120,11 +133,16 @@ CSignalEngine::CSignalEngine()
 {
    m_signal_mode = ON_CANDLE_CLOSE;
    m_ml_enabled = true;
+   m_regime_enabled = true;
+   m_mtf_enabled = true;
    m_touch_count = 0;
    m_signal_pending = false;
    m_atr_period = 14;
    m_zone_detector = NULL;
-   m_ml_filter = NULL;
+   m_ensemble_ml = NULL;
+   m_feature_extractor = NULL;
+   m_regime_detector = NULL;
+   m_mtf_analyzer = NULL;
 }
 
 //+------------------------------------------------------------------+
@@ -133,23 +151,98 @@ CSignalEngine::CSignalEngine()
 CSignalEngine::~CSignalEngine()
 {
    ArrayFree(m_zone_touches);
+   
+   // Clean up allocated objects
+   if(m_feature_extractor != NULL)
+   {
+      delete m_feature_extractor;
+      m_feature_extractor = NULL;
+   }
+   
+   if(m_regime_detector != NULL)
+   {
+      delete m_regime_detector;
+      m_regime_detector = NULL;
+   }
+   
+   if(m_mtf_analyzer != NULL)
+   {
+      delete m_mtf_analyzer;
+      m_mtf_analyzer = NULL;
+   }
 }
 
 //+------------------------------------------------------------------+
 //| Initialize signal engine                                         |
 //+------------------------------------------------------------------+
 bool CSignalEngine::Initialize(CInstitutionalZoneDetector* zone_detector,
-                               CMLFilter* ml_filter,
+                               CEnsembleML* ensemble_ml,
                                ENUM_SIGNAL_MODE signal_mode,
-                               bool ml_enabled)
+                               bool ml_enabled,
+                               bool regime_enabled,
+                               bool mtf_enabled)
 {
    if(zone_detector == NULL)
       return false;
    
    m_zone_detector = zone_detector;
-   m_ml_filter = ml_filter;
+   m_ensemble_ml = ensemble_ml;
    m_signal_mode = signal_mode;
    m_ml_enabled = ml_enabled;
+   m_regime_enabled = regime_enabled;
+   m_mtf_enabled = mtf_enabled;
+   
+   // Initialize Feature Extractor
+   m_feature_extractor = new CFeatureExtractor();
+   if(m_feature_extractor == NULL)
+   {
+      Print("Error: Failed to create Feature Extractor");
+      return false;
+   }
+   
+   if(!m_feature_extractor.Initialize(_Symbol, PERIOD_CURRENT))
+   {
+      Print("Error: Failed to initialize Feature Extractor");
+      delete m_feature_extractor;
+      m_feature_extractor = NULL;
+      return false;
+   }
+   
+   // Initialize Market Regime Detector
+   if(m_regime_enabled)
+   {
+      m_regime_detector = new CMarketRegimeDetector();
+      if(m_regime_detector == NULL)
+      {
+         Print("Warning: Failed to create Market Regime Detector");
+         m_regime_enabled = false;
+      }
+      else if(!m_regime_detector.Initialize(_Symbol, PERIOD_CURRENT))
+      {
+         Print("Warning: Failed to initialize Market Regime Detector");
+         delete m_regime_detector;
+         m_regime_detector = NULL;
+         m_regime_enabled = false;
+      }
+   }
+   
+   // Initialize Multi-Timeframe Analyzer
+   if(m_mtf_enabled)
+   {
+      m_mtf_analyzer = new CMultiTimeframeAnalyzer();
+      if(m_mtf_analyzer == NULL)
+      {
+         Print("Warning: Failed to create MTF Analyzer");
+         m_mtf_enabled = false;
+      }
+      else if(!m_mtf_analyzer.Initialize(_Symbol, PERIOD_CURRENT))
+      {
+         Print("Warning: Failed to initialize MTF Analyzer");
+         delete m_mtf_analyzer;
+         m_mtf_analyzer = NULL;
+         m_mtf_enabled = false;
+      }
+   }
    
    // Initialize zone touch tracking
    int zone_count = m_zone_detector.GetZoneCount();
@@ -165,6 +258,12 @@ bool CSignalEngine::Initialize(CInstitutionalZoneDetector* zone_detector,
       m_zone_touches[i].last_price_before_touch = 0;
    }
    
+   Print("=== Signal Engine v2.0 Initialized ===");
+   Print("Feature Extractor: ", (m_feature_extractor != NULL) ? "OK" : "FAILED");
+   Print("Market Regime: ", m_regime_enabled ? "ENABLED" : "DISABLED");
+   Print("MTF Analysis: ", m_mtf_enabled ? "ENABLED" : "DISABLED");
+   Print("ML Filter: ", m_ml_enabled ? "ENABLED" : "DISABLED");
+   
    return true;
 }
 
@@ -175,6 +274,8 @@ bool CSignalEngine::CheckForSignal(TradingSignal &signal)
 {
    signal.signal_type = 0; // No signal by default
    signal.ml_approved = false;
+   signal.regime_multiplier = 1.0;
+   signal.confluence_score = 0.5;
    
    double current_price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double previous_price = iClose(_Symbol, PERIOD_CURRENT, 1);
@@ -182,9 +283,24 @@ bool CSignalEngine::CheckForSignal(TradingSignal &signal)
    // Update zone touch tracking
    UpdateZoneTouches(current_price, previous_price);
    
+   // Update market regime
+   ENUM_MARKET_REGIME current_regime = REGIME_RANGING;
+   if(m_regime_enabled && m_regime_detector != NULL)
+   {
+      current_regime = m_regime_detector.DetectRegime();
+      signal.market_regime = current_regime;
+   }
+   
+   // Update MTF zones periodically
+   if(m_mtf_enabled && m_mtf_analyzer != NULL)
+   {
+      m_mtf_analyzer.AnalyzeHigherTimeframes();
+   }
+   
    // Check if price is at any zone edge
    bool is_upper_edge;
    int zone_index;
+   m_atr_value = GetATR();
    double edge_tolerance = m_atr_value * 0.1; // 10% of ATR as tolerance
    
    if(!m_zone_detector.IsPriceAtZoneEdge(current_price, is_upper_edge, zone_index, edge_tolerance))
@@ -226,14 +342,50 @@ bool CSignalEngine::CheckForSignal(TradingSignal &signal)
    if(!signal.is_first_touch)
       return false;
    
-   // Extract features for ML evaluation
-   MLFeatures features = ExtractFeatures(signal.signal_type, signal.entry_price, zone_index);
+   // Check market regime favorability
+   if(m_regime_enabled && m_regime_detector != NULL)
+   {
+      if(!m_regime_detector.IsRegimeFavorableForSignal(signal.signal_type))
+      {
+         signal.signal_reason = "Market regime unfavorable: " + m_regime_detector.GetRegimeName(current_regime);
+         return false;
+      }
+      
+      signal.regime_multiplier = m_regime_detector.GetRegimeMultiplier(signal.signal_type);
+   }
    
-   // ML Filter evaluation
-   if(m_ml_enabled && m_ml_filter != NULL)
+   // Calculate confluence score
+   if(m_mtf_enabled && m_mtf_analyzer != NULL)
+   {
+      ConfluenceScore conf_score = m_mtf_analyzer.CalculateConfluence(
+         signal.signal_type, signal.entry_price, zone, signal.is_first_touch);
+      
+      signal.confluence_score = conf_score.total_confluence;
+      
+      // Filter out low-confluence signals
+      if(conf_score.total_confluence < 0.4)
+      {
+         signal.signal_reason = "Low MTF confluence: " + DoubleToString(conf_score.total_confluence, 2);
+         return false;
+      }
+   }
+   
+   // Extract features using FeatureExtractor
+   ExtendedMLFeatures features;
+   if(m_feature_extractor != NULL)
+   {
+      features = m_feature_extractor.ExtractAllFeatures(signal.signal_type, signal.entry_price, 
+                                                        zone, zone_index);
+   }
+   
+   // Ensemble ML evaluation
+   if(m_ml_enabled && m_ensemble_ml != NULL)
    {
       double confidence;
-      bool ml_accept = m_ml_filter.EvaluateSignal(features, confidence);
+      bool ml_accept = m_ensemble_ml.EvaluateSignal(features, confidence);
+      
+      // Apply regime multiplier to confidence
+      confidence *= signal.regime_multiplier;
       
       signal.confidence = confidence;
       signal.ml_approved = ml_accept;
@@ -254,10 +406,22 @@ bool CSignalEngine::CheckForSignal(TradingSignal &signal)
    signal.stop_loss = CalculateStopLoss(signal.signal_type, zone_index);
    signal.take_profit = CalculateTargetPrice(signal.signal_type, signal.entry_price, signal.stop_loss);
    signal.signal_time = TimeCurrent();
-   signal.signal_reason = "Zone edge reversal - First touch";
+   
+   // Build signal reason
+   string reason = "Zone edge reversal - First touch";
+   if(m_regime_enabled)
+      reason += " | Regime: " + m_regime_detector.GetRegimeName(current_regime);
+   if(m_mtf_enabled)
+      reason += " | MTF Conf: " + DoubleToString(signal.confluence_score, 2);
+   
+   signal.signal_reason = reason;
    
    // Reset touch flag for this zone edge
    ResetTouch(zone_index, is_upper_edge);
+   
+   // Update zone touch for MTF analyzer
+   if(m_mtf_analyzer != NULL)
+      m_mtf_analyzer.UpdateZoneTouch(zone.poc_price);
    
    m_last_signal = signal;
    return true;
@@ -393,75 +557,6 @@ bool CSignalEngine::ValidateShortSignal(int zone_index, double price)
    
    return true;
 }
-
-//+------------------------------------------------------------------+
-//| Extract ML features from signal context                          |
-//+------------------------------------------------------------------+
-MLFeatures CSignalEngine::ExtractFeatures(int signal_type, double entry_price, int zone_index)
-{
-   MLFeatures features;
-   
-   InstitutionalZone* zone = m_zone_detector.GetZone(zone_index);
-   if(zone == NULL)
-   {
-      // Return empty features if zone not found
-      features.distance_to_poc = 0;
-      features.distance_to_edge = 0;
-      features.volume_delta = 0;
-      features.rejection_ratio = 0;
-      features.atr_normalized_vol = 0;
-      features.trend_slope = 0;
-      features.time_since_break = 0;
-      features.lvn_proximity = 0;
-      features.signal_type = signal_type;
-      features.entry_price = entry_price;
-      features.entry_time = TimeCurrent();
-      features.outcome = -1;
-      features.actual_rr = 0;
-      return features;
-   }
-   
-   // X1: Distance to POC (normalized by ATR)
-   features.distance_to_poc = MathAbs(entry_price - zone.poc_price) / m_atr_value;
-   
-   // X2: Distance to zone edge (normalized by ATR)
-   double edge_dist = (signal_type == 1) ? 
-                      MathAbs(entry_price - zone.lower_boundary) :
-                      MathAbs(entry_price - zone.upper_boundary);
-   features.distance_to_edge = edge_dist / m_atr_value;
-   
-   // X3: Volume delta at touch candle
-   features.volume_delta = CalculateVolumeDelta(0);
-   
-   // X4: Rejection ratio (wick/body)
-   features.rejection_ratio = CalculateRejectionRatio(0);
-   
-   // X5: ATR-normalized volatility
-   m_atr_value = GetATR();
-   double price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-   features.atr_normalized_vol = m_atr_value / price;
-   
-   // X6: Trend slope (higher timeframe)
-   features.trend_slope = CalculateTrendSlope();
-   
-   // X7: Time since last zone break (in bars)
-   features.time_since_break = GetBarsSinceZoneBreak(zone_index);
-   
-   // X8: LVN proximity
-   double nearest_lvn = (signal_type == 1) ? 
-                        zone.nearest_lvn_below :
-                        zone.nearest_lvn_above;
-   features.lvn_proximity = MathAbs(entry_price - nearest_lvn) / m_atr_value;
-   
-   features.signal_type = signal_type;
-   features.entry_price = entry_price;
-   features.entry_time = TimeCurrent();
-   features.outcome = -1; // Pending
-   features.actual_rr = 0;
-   
-   return features;
-}
-
 //+------------------------------------------------------------------+
 //| Calculate stop loss based on zone and LVN                        |
 //+------------------------------------------------------------------+
@@ -583,13 +678,21 @@ int CSignalEngine::GetBarsSinceZoneBreak(int zone_index)
 //+------------------------------------------------------------------+
 void CSignalEngine::UpdateTradeOutcome(TradingSignal &signal, int outcome, double actual_rr)
 {
-   if(!m_ml_enabled || m_ml_filter == NULL)
+   if(!m_ml_enabled || m_ensemble_ml == NULL || m_feature_extractor == NULL)
       return;
    
-   MLFeatures features = ExtractFeatures(signal.signal_type, signal.entry_price, signal.zone_index);
+   InstitutionalZone* zone = m_zone_detector.GetZone(signal.zone_index);
+   ExtendedMLFeatures features = m_feature_extractor.ExtractAllFeatures(
+      signal.signal_type, signal.entry_price, zone, signal.zone_index);
+   
    features.outcome = outcome;
    features.actual_rr = actual_rr;
    
-   m_ml_filter.UpdateModel(features, outcome);
+   // Update ensemble models
+   m_ensemble_ml.UpdateModels(features, outcome);
+   
+   // Update zone performance in feature extractor
+   if(zone != NULL)
+      m_feature_extractor.UpdateZonePerformance(zone.poc_price, outcome);
 }
 //+------------------------------------------------------------------+

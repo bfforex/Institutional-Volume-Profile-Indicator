@@ -5,8 +5,12 @@
 //+------------------------------------------------------------------+
 #property copyright "Institutional Volume Profile ML System"
 #property link      ""
-#property version   "1.00"
+#property version   "2.00"
 #property strict
+
+#include "FeatureExtractor.mqh"
+
+#define FEATURE_COUNT 18  // Extended from 8 to 18 features
 
 //+------------------------------------------------------------------+
 //| ML Feature Vector Structure                                      |
@@ -38,10 +42,10 @@ class CMLFilter
 {
 private:
    // Model parameters
-   double m_weights[8];           // Weight vector for 8 features
-   double m_bias;                 // Bias term
-   double m_learning_rate;        // SGD learning rate
-   double m_confidence_threshold; // Minimum confidence to accept signal
+   double m_weights[FEATURE_COUNT];    // Weight vector for 18 features
+   double m_bias;                      // Bias term
+   double m_learning_rate;             // SGD learning rate
+   double m_confidence_threshold;      // Minimum confidence to accept signal
    
    // Performance tracking
    int    m_total_signals;
@@ -50,7 +54,7 @@ private:
    int    m_failed_trades;
    
    // History storage
-   MLFeatures m_history[];
+   ExtendedMLFeatures m_history[];     // Updated to ExtendedMLFeatures
    int    m_history_size;
    int    m_max_history;
    
@@ -59,8 +63,8 @@ private:
    int    m_file_handle;
    
    // Normalization parameters (for feature scaling)
-   double m_feature_min[8];
-   double m_feature_max[8];
+   double m_feature_min[FEATURE_COUNT];
+   double m_feature_max[FEATURE_COUNT];
    
 public:
    CMLFilter();
@@ -70,18 +74,18 @@ public:
    void Deinitialize();
    
    // Core ML functions
-   bool EvaluateSignal(MLFeatures &features, double &confidence);
-   void UpdateModel(MLFeatures &features, int outcome);
-   double PredictProbability(MLFeatures &features);
+   bool EvaluateSignal(ExtendedMLFeatures &features, double &confidence);
+   void UpdateModel(ExtendedMLFeatures &features, int outcome);
+   double PredictProbability(ExtendedMLFeatures &features);
    
    // Feature engineering
-   void NormalizeFeatures(MLFeatures &features);
+   void NormalizeFeatures(ExtendedMLFeatures &features);
    double CalculateConfidence(double probability);
    
    // History management
    bool SaveHistory();
    bool LoadHistory();
-   void AddToHistory(MLFeatures &features);
+   void AddToHistory(ExtendedMLFeatures &features);
    
    // Performance metrics
    double GetAccuracy();
@@ -95,9 +99,9 @@ public:
 private:
    // Helper functions
    double Sigmoid(double x);
-   double DotProduct(double weights[], MLFeatures &features);
+   double DotProduct(double weights[], ExtendedMLFeatures &features);
    void InitializeWeights();
-   void UpdateNormalizationParams(MLFeatures &features);
+   void UpdateNormalizationParams(ExtendedMLFeatures &features);
 };
 
 //+------------------------------------------------------------------+
@@ -118,7 +122,7 @@ CMLFilter::CMLFilter()
    InitializeWeights();
    
    // Initialize normalization parameters
-   for(int i = 0; i < 8; i++)
+   for(int i = 0; i < FEATURE_COUNT; i++)
    {
       m_feature_min[i] = 1e10;
       m_feature_max[i] = -1e10;
@@ -165,7 +169,7 @@ void CMLFilter::Deinitialize()
 void CMLFilter::InitializeWeights()
 {
    MathSrand((int)TimeLocal());
-   for(int i = 0; i < 8; i++)
+   for(int i = 0; i < FEATURE_COUNT; i++)
    {
       m_weights[i] = (MathRand() / 32768.0 - 0.5) * 0.01; // Small random values
    }
@@ -186,10 +190,11 @@ double CMLFilter::Sigmoid(double x)
 //+------------------------------------------------------------------+
 //| Calculate dot product of weights and features                    |
 //+------------------------------------------------------------------+
-double CMLFilter::DotProduct(double weights[], MLFeatures &features)
+double CMLFilter::DotProduct(double weights[], ExtendedMLFeatures &features)
 {
    double sum = m_bias;
    
+   // Original 8 features
    sum += weights[0] * features.distance_to_poc;
    sum += weights[1] * features.distance_to_edge;
    sum += weights[2] * features.volume_delta;
@@ -199,18 +204,30 @@ double CMLFilter::DotProduct(double weights[], MLFeatures &features)
    sum += weights[6] * features.time_since_break;
    sum += weights[7] * features.lvn_proximity;
    
+   // New 10 features
+   sum += weights[8] * features.order_flow_imbalance;
+   sum += weights[9] * features.market_session;
+   sum += weights[10] * features.spread_normalized;
+   sum += weights[11] * features.rsi_value;
+   sum += weights[12] * features.rsi_divergence;
+   sum += weights[13] * features.vwap_distance;
+   sum += weights[14] * features.cumulative_delta;
+   sum += weights[15] * features.bb_position;
+   sum += weights[16] * features.historical_zone_winrate;
+   sum += weights[17] * features.candle_body_ratio;
+   
    return sum;
 }
 
 //+------------------------------------------------------------------+
 //| Normalize features to [0, 1] range                               |
 //+------------------------------------------------------------------+
-void CMLFilter::NormalizeFeatures(MLFeatures &features)
+void CMLFilter::NormalizeFeatures(ExtendedMLFeatures &features)
 {
    UpdateNormalizationParams(features);
    
    // Create array of feature values for normalization
-   double raw_features[8];
+   double raw_features[FEATURE_COUNT];
    raw_features[0] = features.distance_to_poc;
    raw_features[1] = features.distance_to_edge;
    raw_features[2] = features.volume_delta;
@@ -219,9 +236,19 @@ void CMLFilter::NormalizeFeatures(MLFeatures &features)
    raw_features[5] = features.trend_slope;
    raw_features[6] = features.time_since_break;
    raw_features[7] = features.lvn_proximity;
+   raw_features[8] = features.order_flow_imbalance;
+   raw_features[9] = features.market_session;
+   raw_features[10] = features.spread_normalized;
+   raw_features[11] = features.rsi_value;
+   raw_features[12] = features.rsi_divergence;
+   raw_features[13] = features.vwap_distance;
+   raw_features[14] = features.cumulative_delta;
+   raw_features[15] = features.bb_position;
+   raw_features[16] = features.historical_zone_winrate;
+   raw_features[17] = features.candle_body_ratio;
    
    // Normalize each feature
-   for(int i = 0; i < 8; i++)
+   for(int i = 0; i < FEATURE_COUNT; i++)
    {
       double range = m_feature_max[i] - m_feature_min[i];
       if(range > 0.0001) // Avoid division by zero
@@ -243,14 +270,24 @@ void CMLFilter::NormalizeFeatures(MLFeatures &features)
    features.trend_slope = raw_features[5];
    features.time_since_break = raw_features[6];
    features.lvn_proximity = raw_features[7];
+   features.order_flow_imbalance = raw_features[8];
+   features.market_session = raw_features[9];
+   features.spread_normalized = raw_features[10];
+   features.rsi_value = raw_features[11];
+   features.rsi_divergence = raw_features[12];
+   features.vwap_distance = raw_features[13];
+   features.cumulative_delta = raw_features[14];
+   features.bb_position = raw_features[15];
+   features.historical_zone_winrate = raw_features[16];
+   features.candle_body_ratio = raw_features[17];
 }
 
 //+------------------------------------------------------------------+
 //| Update normalization parameters                                  |
 //+------------------------------------------------------------------+
-void CMLFilter::UpdateNormalizationParams(MLFeatures &features)
+void CMLFilter::UpdateNormalizationParams(ExtendedMLFeatures &features)
 {
-   double raw_features[8];
+   double raw_features[FEATURE_COUNT];
    raw_features[0] = features.distance_to_poc;
    raw_features[1] = features.distance_to_edge;
    raw_features[2] = features.volume_delta;
@@ -259,8 +296,18 @@ void CMLFilter::UpdateNormalizationParams(MLFeatures &features)
    raw_features[5] = features.trend_slope;
    raw_features[6] = features.time_since_break;
    raw_features[7] = features.lvn_proximity;
+   raw_features[8] = features.order_flow_imbalance;
+   raw_features[9] = features.market_session;
+   raw_features[10] = features.spread_normalized;
+   raw_features[11] = features.rsi_value;
+   raw_features[12] = features.rsi_divergence;
+   raw_features[13] = features.vwap_distance;
+   raw_features[14] = features.cumulative_delta;
+   raw_features[15] = features.bb_position;
+   raw_features[16] = features.historical_zone_winrate;
+   raw_features[17] = features.candle_body_ratio;
    
-   for(int i = 0; i < 8; i++)
+   for(int i = 0; i < FEATURE_COUNT; i++)
    {
       if(raw_features[i] < m_feature_min[i])
          m_feature_min[i] = raw_features[i];
@@ -272,7 +319,7 @@ void CMLFilter::UpdateNormalizationParams(MLFeatures &features)
 //+------------------------------------------------------------------+
 //| Predict probability of signal success                            |
 //+------------------------------------------------------------------+
-double CMLFilter::PredictProbability(MLFeatures &features)
+double CMLFilter::PredictProbability(ExtendedMLFeatures &features)
 {
    NormalizeFeatures(features);
    double z = DotProduct(m_weights, features);
@@ -291,7 +338,7 @@ double CMLFilter::CalculateConfidence(double probability)
 //+------------------------------------------------------------------+
 //| Evaluate if signal should be accepted                            |
 //+------------------------------------------------------------------+
-bool CMLFilter::EvaluateSignal(MLFeatures &features, double &confidence)
+bool CMLFilter::EvaluateSignal(ExtendedMLFeatures &features, double &confidence)
 {
    m_total_signals++;
    
@@ -315,7 +362,7 @@ bool CMLFilter::EvaluateSignal(MLFeatures &features, double &confidence)
 //+------------------------------------------------------------------+
 //| Update model with trade outcome (online learning)                |
 //+------------------------------------------------------------------+
-void CMLFilter::UpdateModel(MLFeatures &features, int outcome)
+void CMLFilter::UpdateModel(ExtendedMLFeatures &features, int outcome)
 {
    // Update trade statistics
    if(outcome == 1)
@@ -334,7 +381,7 @@ void CMLFilter::UpdateModel(MLFeatures &features, int outcome)
    double error = (double)outcome - prediction;
    
    // Update weights using stochastic gradient descent
-   double feature_array[8];
+   double feature_array[FEATURE_COUNT];
    feature_array[0] = features.distance_to_poc;
    feature_array[1] = features.distance_to_edge;
    feature_array[2] = features.volume_delta;
@@ -343,8 +390,18 @@ void CMLFilter::UpdateModel(MLFeatures &features, int outcome)
    feature_array[5] = features.trend_slope;
    feature_array[6] = features.time_since_break;
    feature_array[7] = features.lvn_proximity;
+   feature_array[8] = features.order_flow_imbalance;
+   feature_array[9] = features.market_session;
+   feature_array[10] = features.spread_normalized;
+   feature_array[11] = features.rsi_value;
+   feature_array[12] = features.rsi_divergence;
+   feature_array[13] = features.vwap_distance;
+   feature_array[14] = features.cumulative_delta;
+   feature_array[15] = features.bb_position;
+   feature_array[16] = features.historical_zone_winrate;
+   feature_array[17] = features.candle_body_ratio;
    
-   for(int i = 0; i < 8; i++)
+   for(int i = 0; i < FEATURE_COUNT; i++)
    {
       m_weights[i] += m_learning_rate * error * feature_array[i];
    }
@@ -393,7 +450,7 @@ void CMLFilter::AdjustSensitivity()
 //+------------------------------------------------------------------+
 //| Add features to history                                          |
 //+------------------------------------------------------------------+
-void CMLFilter::AddToHistory(MLFeatures &features)
+void CMLFilter::AddToHistory(ExtendedMLFeatures &features)
 {
    if(m_history_size >= m_max_history)
    {
@@ -446,7 +503,10 @@ bool CMLFilter::SaveHistory()
    // Write header
    FileWrite(m_file_handle, "EntryTime", "EntryPrice", "SignalType", 
              "DistPOC", "DistEdge", "VolDelta", "RejRatio", "ATRVol", 
-             "TrendSlope", "TimeSinceBreak", "LVNProx", "Outcome", "ActualRR");
+             "TrendSlope", "TimeSinceBreak", "LVNProx",
+             "OrderFlowImb", "MarketSession", "SpreadNorm", "RSI", "RSIDiverg",
+             "VWAPDist", "CumDelta", "BBPos", "HistWinRate", "BodyRatio",
+             "Outcome", "ActualRR");
    
    // Write data
    for(int i = 0; i < m_history_size; i++)
@@ -463,14 +523,26 @@ bool CMLFilter::SaveHistory()
                 DoubleToString(m_history[i].trend_slope, 5),
                 DoubleToString(m_history[i].time_since_break, 1),
                 DoubleToString(m_history[i].lvn_proximity, 5),
+                DoubleToString(m_history[i].order_flow_imbalance, 3),
+                DoubleToString(m_history[i].market_session, 2),
+                DoubleToString(m_history[i].spread_normalized, 3),
+                DoubleToString(m_history[i].rsi_value, 3),
+                DoubleToString(m_history[i].rsi_divergence, 2),
+                DoubleToString(m_history[i].vwap_distance, 3),
+                DoubleToString(m_history[i].cumulative_delta, 2),
+                DoubleToString(m_history[i].bb_position, 3),
+                DoubleToString(m_history[i].historical_zone_winrate, 3),
+                DoubleToString(m_history[i].candle_body_ratio, 3),
                 IntegerToString(m_history[i].outcome),
                 DoubleToString(m_history[i].actual_rr, 2));
    }
    
    // Write model parameters
    FileWrite(m_file_handle, "--- Model Parameters ---");
-   FileWrite(m_file_handle, "Weights", m_weights[0], m_weights[1], m_weights[2], 
-             m_weights[3], m_weights[4], m_weights[5], m_weights[6], m_weights[7]);
+   string weights_str = "Weights";
+   for(int i = 0; i < FEATURE_COUNT; i++)
+      weights_str += "," + DoubleToString(m_weights[i], 6);
+   FileWrite(m_file_handle, weights_str);
    FileWrite(m_file_handle, "Bias", m_bias);
    FileWrite(m_file_handle, "Threshold", m_confidence_threshold);
    FileWrite(m_file_handle, "Accuracy", GetAccuracy());
@@ -508,10 +580,13 @@ bool CMLFilter::LoadHistory()
          // Read weights
          if(!FileIsEnding(m_file_handle))
          {
-            FileReadString(m_file_handle); // "Weights" label
-            for(int i = 0; i < 8; i++)
+            string weights_line = FileReadString(m_file_handle);
+            // Parse comma-separated weights
+            string weight_parts[];
+            int parts_count = StringSplit(weights_line, ',', weight_parts);
+            for(int i = 0; i < FEATURE_COUNT && i < parts_count - 1; i++)
             {
-               m_weights[i] = StringToDouble(FileReadString(m_file_handle));
+               m_weights[i] = StringToDouble(weight_parts[i + 1]);
             }
          }
          
